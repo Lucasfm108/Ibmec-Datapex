@@ -1,0 +1,298 @@
+---
+title: "Ibmec - Datapex"
+output: 
+  flexdashboard::flex_dashboard:
+    logo: logo2.png
+    orientation: row
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+########################
+##Carregar os pacotes###
+########################
+library(flexdashboard)
+library(tidyverse)
+library(rio)
+library(leaflet)
+library(rgdal)
+library(highcharter)
+library(treemap)
+library(kableExtra)
+
+
+######################
+###Importar a base####
+######################
+
+bd <- import("base_comercio.xlsx")
+
+##########
+###KPIs###
+##########
+
+options(scipen=999)
+balanca2016 <- bd %>% filter(ano==2016) %>% 
+  group_by(tipo) %>% 
+  summarise(valor_mi=sum(valor_mi)) 
+
+
+##########
+###Mapa###
+##########
+
+#--------------------
+##Modificando a base
+#--------------------
+
+temp <- bd %>% 
+  group_by(tipo, pais_destino, cod_pais_destino) %>% 
+  summarise(valor_mi=sum(valor_mi)) %>% 
+  drop_na(cod_pais_destino) %>% 
+  spread("tipo","valor_mi") 
+
+temp$Export[is.na(temp$Export)] <- 0
+temp$Import[is.na(temp$Import)] <- 0
+
+temp$bl_prop <- round(((temp$Export/temp$Import)-1)*100,2)
+
+temp <- temp %>% filter(bl_prop<=200)
+
+map <- readOGR("all_countries.shp", use_iconv=TRUE, encoding="UTF-8")  
+
+map$bl_prop <- temp$bl_prop[match(map$ADM0_A3,temp$cod_pais_destino)]
+map$bl_prop[is.na(map$bl_prop) & map$ADM0_A3!="BRA"] <- 0
+
+#---------------
+##Criando o mapa
+#---------------
+
+color_prop <- colorNumeric("RdYlGn", domain = map@data$bl_prop,
+                          na.color = NA)
+
+labs1 <- lapply(seq(nrow(map)), function(i) {
+  paste0( '<p>', map@data[i, "formal_nam"], '<p></p>', 
+          "Balança comercial: ", map@data[i, "bl_prop"],"%")
+})
+
+p1 <- map %>% 
+  leaflet() %>%
+  addProviderTiles("CartoDB") %>% 
+  addPolygons(
+    weight = 2, fillOpacity = 0.5, color = ~color_prop(bl_prop),
+    # add labels that display mean income
+    # highlight polygons on hover
+    label = lapply(labs1, htmltools::HTML),
+    highlight = highlightOptions(weight = 5, color = "white",
+                                 bringToFront = TRUE,
+                                 fillOpacity = 0.9)
+  ) %>%
+      addLegend(position="bottomleft",pal=color_prop, values=~bl_prop,
+                title="Balança Comercial %", opacity=1)
+
+
+####################
+###Serie temporal###
+####################
+
+temp <- bd %>% group_by(ano, tipo) %>% 
+  summarise(valor_mi=round(sum(valor_mi))) %>% 
+  rename(Ano=ano, `Valor em mi`=valor_mi,
+         Tipo=tipo) %>% 
+  mutate(crf=ifelse(Tipo=="Export","#deeaee","#92a8d1"))
+
+p2 <- hchart(temp, 
+           'line', hcaes(x = 'Ano', y = `Valor em mi`, group = "Tipo",
+                         color=crf))%>% 
+      hc_legend(enabled = T)
+
+#############
+###Barra 1###
+#############
+
+temp <- bd %>% filter(ano==2016) %>% 
+    group_by(tipo, desc_commod) %>% 
+    summarise(valor_mi=round(sum(valor_mi),2))
+  
+p3 <-  temp %>% filter(tipo=="Export") %>% 
+  arrange(desc(valor_mi)) %>% 
+  mutate(crf="#deeaee") %>% 
+  slice(1:20) %>% 
+  hchart(type = "column", 
+       hcaes(x = desc_commod, 
+             y = valor_mi,
+             color =crf))
+
+############
+##Barra 2###
+############
+
+p4 <-  temp %>% filter(tipo=="Import") %>% 
+  arrange(desc(valor_mi)) %>% 
+  mutate(crf="#92a8d1") %>% 
+  slice(1:20) %>% 
+  hchart(type = "column", 
+       hcaes(x = desc_commod, 
+             y = valor_mi,
+             color =crf))
+
+
+```
+
+
+<style>                     
+.navbar {
+  background-color:#042353;
+  border-color: black;
+}
+
+.navbar-brand {
+    float: right;
+}
+
+.navbar-inverse .navbar-nav>.active>a, .navbar-inverse .navbar-nav>.active>a:hover, .navbar-inverse .navbar-nav>.active>a:focus{
+  
+  background-color: #dcad3f;
+}
+
+.chart-title {
+  border-color: black;
+  color:white;
+  background-color: #042353;
+  text-align: center;
+  font-family: "Times New Roman";
+  font-size: 20px;
+
+}
+
+.value-box {
+
+  border: 2px solid black;
+  border-radius: 25px;
+
+}
+
+.value-box > .inner {
+  
+  color: white !Important;
+
+}
+
+
+}
+
+</style> 
+
+
+
+Análise agregada {data-icon="fa-signal"}
+===================================== 
+
+Row {data-width=150}
+--------------------------------------
+
+### Balança comercial em 2016
+```{r}
+valor <- round(balanca2016$valor_mi[balanca2016$tipo=="Export"]-balanca2016$valor_mi[balanca2016$tipo=="Import"],2)
+
+valor <- format(valor, nsmall=1, big.mark=".",
+                decimal.mark = ",")
+
+
+valueBox(value = paste0("US$",valor," mi"),icon = "ion-cash",caption = paste0("Resultado da balança",'<br>',"comercial em 2016"),color = "#b1cbbb")
+```
+
+
+### Total de exportação ($) em 2016
+```{r}
+
+valor2 <- round(balanca2016$valor_mi[balanca2016$tipo=="Export"],2)
+
+valor2 <- format(valor2, nsmall=1, big.mark=".",
+                decimal.mark = ",")
+
+valueBox(value = paste0("US$",valor2, " mi"),icon = "ion-arrow-up-c",caption = "Total de exportação em 2016",
+         color = "#034f84")
+```
+
+### Total de importação (em mi $) em 2016
+```{r}
+valor3 <- round(balanca2016$valor_mi[balanca2016$tipo=="Import"],2)
+
+valor3 <- format(valor3, nsmall=1, big.mark=".",
+                decimal.mark = ",")
+
+valueBox(value = paste0("US$",valor3, " mi"),icon = "ion-arrow-down-c",caption = "Total de importação em 2016",
+         color = "#f7786b")
+```
+
+
+Row
+--------------------------------------
+
+### Balança comercial em % (Export/Import)
+
+```{r}
+p1
+```
+
+
+### Série Temporal da exportação e importação
+
+```{r}
+p2
+```
+
+
+Análise por produto {data-icon="fa-signal"}
+===================================== 
+
+Row 
+-------------------------------------
+
+### Principais produtos exportados em 2016
+
+```{r}
+p3
+```
+
+### Principais produtos importados em 2016
+
+```{r}
+p4
+```
+
+Row {.tabset .tabset-fade}
+-------------------------------------
+
+
+### Tabela com todos produtos exportados em 2016
+
+```{r}
+temp %>% ungroup() %>%  filter(tipo=="Export") %>% 
+  select(-tipo) %>% 
+  arrange(desc(valor_mi)) %>% 
+  rename(Produto=desc_commod, `Valor em US$ mi`=valor_mi) %>%
+  DT::datatable(extensions = 'Buttons',
+                options = list(dom = 'Blfrtip',
+                               buttons = c('copy', 'csv', 'excel'),
+                               lengthMenu = list(c(10, 50, -1),
+                                                 c(10, 50, "All"))))
+  
+
+
+```   
+ 
+### Tabela com todos produtos importados em 2016
+    
+```{r}
+temp %>% ungroup() %>%  filter(tipo=="Import") %>% 
+  select(-tipo) %>% 
+  arrange(desc(valor_mi)) %>% 
+  rename(Produto=desc_commod, `Valor em US$ mi`=valor_mi) %>%
+  DT::datatable(extensions = 'Buttons',
+                options = list(dom = 'Blfrtip',
+                               buttons = c('copy', 'csv', 'excel'),
+                               lengthMenu = list(c(10, 50, -1),
+                                                 c(10, 50, "All"))))
+```
